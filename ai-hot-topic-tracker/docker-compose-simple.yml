@@ -13,28 +13,19 @@ services:
       - NEWS_API_KEY=${NEWS_API_KEY}
       - DEBUG=true
     volumes:
-      - ./backend:/app
       - backend_data:/app/data
     restart: unless-stopped
-    networks:
-      - ai-tracker-network
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: ai-tracker-frontend
+    image: nginx:alpine
+    container_name: ai-tracker-frontend-simple
     ports:
       - "3000:80"
+    volumes:
+      - ./frontend-simple:/usr/share/nginx/html:ro
     depends_on:
       - backend
     restart: unless-stopped
-    networks:
-      - ai-tracker-network
 
 volumes:
   backend_data:
-
-networks:
-  ai-tracker-network:
-    driver: bridge
