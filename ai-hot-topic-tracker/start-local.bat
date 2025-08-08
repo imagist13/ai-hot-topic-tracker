@@ -62,7 +62,7 @@ npm install
 
 REM 启动前端服务
 echo 🚀 启动前端服务...
-start cmd /k "npm start"
+start cmd /k "npm run dev"
 
 cd ..
 
