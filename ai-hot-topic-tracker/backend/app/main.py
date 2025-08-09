@@ -1,10 +1,11 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from typing import Dict, Any, List
 import json
 import asyncio
 from contextlib import asynccontextmanager
+from fastapi import Request
 
 from .agents.ui_agent import UIAgent
 from .agents.task_agent import TaskAgent
@@ -194,6 +195,59 @@ async def get_analysis_types():
     try:
         types = await mcp.analysis_agent.get_available_analysis_types()
         return {"analysis_types": types}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: Request):
+    """SSE聊天流式响应端点"""
+    try:
+        body = await request.json()
+        message = body.get("message", "")
+        
+        if not message:
+            raise HTTPException(status_code=400, detail="消息不能为空")
+        
+        async def generate_response():
+            # 模拟AI思考和逐步响应
+            yield f"data: {json.dumps({'type': 'thinking', 'content': '正在思考...'})}\n\n"
+            await asyncio.sleep(0.5)
+            
+            # 处理用户消息
+            try:
+                result = await mcp.process_user_message(message)
+                response_text = result.get("message", "处理完成")
+                
+                # 将响应按句子分割，实现打字机效果
+                sentences = response_text.split('。')
+                for i, sentence in enumerate(sentences):
+                    if sentence.strip():
+                        if i == len(sentences) - 1 and not sentence.endswith('。'):
+                            # 最后一句，保持原样
+                            content = sentence
+                        else:
+                            content = sentence + '。'
+                        
+                        yield f"data: {json.dumps({'type': 'content', 'content': content})}\n\n"
+                        await asyncio.sleep(0.3)  # 打字机延迟
+                
+                # 发送完成标识
+                yield f"data: {json.dumps({'type': 'done', 'result': result})}\n\n"
+                
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'content': f'处理消息时出错: {str(e)}'})}\n\n"
+        
+        return StreamingResponse(
+            generate_response(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

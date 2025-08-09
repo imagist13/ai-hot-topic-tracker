@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import type { Message, WebSocketMessage } from '../types'
-import { useWebSocket } from '../hooks/useWebSocket'
+import type { Message } from '../types'
+import { SSEChatClient } from '../services/api'
+import { useStreamingTypewriter } from '../hooks/useTypewriter'
+import { generateUniqueId, formatMessage, formatTime, isEmpty } from '../utils/helpers'
 
 interface ChatInterfaceProps {
   onTaskCreated: () => void
@@ -9,21 +11,40 @@ interface ChatInterfaceProps {
 const ChatInterface = ({ onTaskCreated }: ChatInterfaceProps) => {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputMessage, setInputMessage] = useState('')
-  const [isTyping, setIsTyping] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('disconnected')
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const sseClient = useRef(new SSEChatClient())
+  const { displayText, isTyping, addChunk, reset: resetTypewriter, markComplete } = useStreamingTypewriter()
+  const [currentBotMessageId, setCurrentBotMessageId] = useState<string | null>(null)
+  const [isThinkingMode, setIsThinkingMode] = useState(false)
 
-  const { sendMessage, connectionStatus } = useWebSocket(
-    'ws://localhost:8000/ws',
-    {
-      onMessage: handleWebSocketMessage,
+  // 检查后端连接状态
+  useEffect(() => {
+    const checkConnection = async () => {
+      try {
+        setConnectionStatus('connecting')
+        const response = await fetch('http://localhost:8000/health')
+        if (response.ok) {
+          setConnectionStatus('connected')
+        } else {
+          setConnectionStatus('disconnected')
+        }
+      } catch (error) {
+        setConnectionStatus('disconnected')
+      }
     }
-  )
+
+    checkConnection()
+    const interval = setInterval(checkConnection, 10000) // 每10秒检查一次
+
+    return () => clearInterval(interval)
+  }, [])
 
   // 添加欢迎消息
   useEffect(() => {
     setMessages([
       {
-        id: '1',
+        id: generateUniqueId(),
         type: 'bot',
         content: `👋 您好！我是您的 AI 热点追踪助手。
 
@@ -41,37 +62,24 @@ const ChatInterface = ({ onTaskCreated }: ChatInterfaceProps) => {
   // 自动滚动到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, displayText])
 
-  function handleWebSocketMessage(data: any) {
-    if (data.type === 'response') {
-      addMessage(data.message, 'bot')
-      setIsTyping(false)
-      
-      // 如果是任务创建响应，触发数据刷新
-      if (data.message.includes('创建任务') || data.message.includes('已创建')) {
-        onTaskCreated()
-      }
-    } else if (data.type === 'task_result') {
-      const resultMessage = `🎯 **${data.task_name}** 分析完成！
-
-📊 **摘要**: ${data.result.summary}
-
-📈 **情感倾向**: ${data.result.sentiment} ${data.result.sentiment_emoji}
-
-📋 **关键要点**:
-${data.result.key_points?.map((point: string) => `• ${point}`).join('\n') || '暂无要点'}
-
-🔢 **分析数据**: ${data.result.data_count} 项内容`
-
-      addMessage(resultMessage, 'bot')
-      onTaskCreated() // 刷新侧边栏数据
+  // 当打字机效果在进行时，更新对应的机器人消息
+  useEffect(() => {
+    if (displayText && currentBotMessageId) {
+      setMessages(prev => {
+        return prev.map(message => 
+          message.id === currentBotMessageId 
+            ? { ...message, content: displayText }
+            : message
+        )
+      })
     }
-  }
+  }, [displayText, currentBotMessageId])
 
   const addMessage = (content: string, type: 'user' | 'bot') => {
     const newMessage: Message = {
-      id: Date.now().toString(),
+      id: generateUniqueId(),
       type,
       content,
       timestamp: new Date(),
@@ -79,25 +87,82 @@ ${data.result.key_points?.map((point: string) => `• ${point}`).join('\n') || '
     setMessages(prev => [...prev, newMessage])
   }
 
-  const handleSendMessage = () => {
-    if (!inputMessage.trim()) return
+  const handleSendMessage = async () => {
+    if (isEmpty(inputMessage)) return
 
-    addMessage(inputMessage, 'user')
-    setIsTyping(true)
-
-    const message: WebSocketMessage = {
-      type: 'chat_message',
-      message: inputMessage,
-    }
-
-    if (connectionStatus === 'connected') {
-      sendMessage(message)
-    } else {
-      setIsTyping(false)
-      addMessage('❌ 连接断开，请检查后端服务是否运行', 'bot')
-    }
-
+    const userMessage = inputMessage
+    addMessage(userMessage, 'user')
     setInputMessage('')
+
+    if (connectionStatus !== 'connected') {
+      addMessage('❌ 连接断开，请检查后端服务是否运行', 'bot')
+      return
+    }
+
+    // 重置打字机状态
+    resetTypewriter()
+    setIsThinkingMode(false)
+
+    // 创建一个新的机器人消息用于显示流式输出
+    const botMessageId = generateUniqueId()
+    const botMessage: Message = {
+      id: botMessageId,
+      type: 'bot',
+      content: '',
+      timestamp: new Date(),
+    }
+    setMessages(prev => [...prev, botMessage])
+    setCurrentBotMessageId(botMessageId)
+
+    try {
+      await sseClient.current.sendMessage(
+        userMessage,
+        (chunk) => {
+          console.log('收到SSE数据:', chunk)
+          
+          if (chunk.type === 'thinking') {
+            // 显示思考状态
+            resetTypewriter()
+            setIsThinkingMode(true)
+            const thinkingText = '🤔 ' + (chunk.content || '正在思考...')
+            addChunk(thinkingText)
+          } else if (chunk.type === 'content') {
+            // 如果之前是思考模式，先重置
+            if (isThinkingMode) {
+              resetTypewriter()
+              setIsThinkingMode(false)
+            }
+            // 添加内容块
+            if (chunk.content) {
+              addChunk(chunk.content)
+            }
+          } else if (chunk.type === 'done') {
+            // 完成
+            markComplete()
+            if (chunk.result?.message?.includes('创建任务') || chunk.result?.message?.includes('已创建')) {
+              onTaskCreated()
+            }
+          } else if (chunk.type === 'error') {
+            // 错误处理
+            resetTypewriter()
+            const errorText = '❌ ' + (chunk.content || '处理消息时出错')
+            addChunk(errorText)
+            markComplete()
+          }
+        },
+        (error) => {
+          console.error('SSE错误:', error)
+          setCurrentBotMessageId(null)
+          addMessage(`❌ 发送消息失败: ${error}`, 'bot')
+        },
+        () => {
+          console.log('SSE连接完成')
+          setCurrentBotMessageId(null)
+        }
+      )
+    } catch (error) {
+      addMessage(`❌ 发送消息失败: ${error}`, 'bot')
+    }
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -107,19 +172,7 @@ ${data.result.key_points?.map((point: string) => `• ${point}`).join('\n') || '
     }
   }
 
-  const formatMessage = (content: string) => {
-    return content
-      .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-gray-900">$1</strong>')
-      .replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
-      .replace(/\n/g, '<br>')
-  }
 
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString('zh-CN', {
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  }
 
   return (
     <div className="card-glass h-full flex flex-col">
@@ -221,7 +274,7 @@ ${data.result.key_points?.map((point: string) => `• ${point}`).join('\n') || '
           />
           <button
             onClick={handleSendMessage}
-            disabled={!inputMessage.trim() || connectionStatus !== 'connected'}
+            disabled={isEmpty(inputMessage) || connectionStatus !== 'connected'}
             className="button-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:hover:scale-100"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

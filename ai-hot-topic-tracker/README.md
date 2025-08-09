@@ -5,9 +5,10 @@
 ## 🚀 项目特性
 
 - **对话式交互**: 通过自然语言与 AI 助手对话，轻松配置追踪任务
+- **流式响应**: 支持 SSE (Server-Sent Events) 流式输出，提供打字机效果
 - **智能分析**: 使用 OpenAI 或 DeepSeek API 进行文本分析和摘要生成
 - **定时任务**: 自动定期收集和分析最新数据
-- **实时更新**: WebSocket 实时推送分析结果
+- **实时更新**: WebSocket + SSE 双重实时推送分析结果
 - **多数据源**: 支持新闻 API、Reddit 等多种数据源
 - **Agent 架构**: 采用 MCP + A2A 架构，模块化设计
 
@@ -44,7 +45,9 @@ Frontend (React) ←→ MCP ←→ Agents
 ### 前端
 - **React 18**: 用户界面构建
 - **TypeScript**: 类型安全
+- **Axios**: HTTP 客户端和 API 请求
 - **CSS3**: 现代化样式设计
+- **SSE**: 流式数据接收和打字机效果
 - **WebSocket**: 实时通信
 
 ### 部署
@@ -94,6 +97,58 @@ ai-hot-topic-tracker/
 ├── 部署指南.md             # 部署指南
 └── README.md              # 项目说明
 ```
+
+## 🧪 SSE 流式输出测试
+
+### 快速测试新的流式功能
+
+我们已经升级了前后端连接方式，现在支持：
+- ✅ **Axios** 替代原生 fetch 进行 API 请求
+- ✅ **SSE (Server-Sent Events)** 实现流式响应
+- ✅ **打字机效果** 让AI回复更生动自然
+
+### 快速启动测试
+
+#### Windows 用户
+```bash
+# 一键启动测试
+test-sse.bat
+```
+
+#### 手动启动测试
+
+1. **安装前端依赖**
+```bash
+cd frontend
+npm install
+```
+
+2. **启动后端服务**
+```bash
+cd backend
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+3. **启动前端服务**
+```bash
+cd frontend
+npm run dev
+```
+
+4. **测试 SSE 端点**
+```bash
+# 使用 Python 脚本测试
+python test_sse_endpoint.py
+```
+
+### 测试功能
+
+- 🔗 **连接状态**: 右上角显示在线/离线状态
+- 💬 **流式对话**: 发送消息查看打字机效果
+- 🎯 **任务创建**: 尝试 "追踪人工智能最新突破"
+- ⚡ **实时响应**: 观察AI逐句生成回复
+
+---
 
 ## 🚀 快速开始
 

@@ -2,25 +2,33 @@ import { useState, useEffect } from 'react'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
 import ChatInterface from './components/ChatInterface'
-import { useWebSocket } from './hooks/useWebSocket'
+import { apiService } from './services/api'
 
 function App() {
   const [tasks, setTasks] = useState([])
   const [recentResults, setRecentResults] = useState([])
-  const { connectionStatus } = useWebSocket('ws://localhost:8000/ws')
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('disconnected')
 
   useEffect(() => {
     fetchTasks()
     fetchRecentResults()
+    checkConnectionStatus()
   }, [])
+
+  const checkConnectionStatus = async () => {
+    try {
+      setConnectionStatus('connecting')
+      await apiService.healthCheck()
+      setConnectionStatus('connected')
+    } catch (error) {
+      setConnectionStatus('disconnected')
+    }
+  }
 
   const fetchTasks = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/tasks')
-      if (response.ok) {
-        const data = await response.json()
-        setTasks(data.tasks || [])
-      }
+      const data = await apiService.getTasks()
+      setTasks(data.tasks || [])
     } catch (error) {
       console.error('Failed to fetch tasks:', error)
     }
@@ -28,11 +36,8 @@ function App() {
 
   const fetchRecentResults = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/results')
-      if (response.ok) {
-        const data = await response.json()
-        setRecentResults(data.results || [])
-      }
+      const data = await apiService.getResults()
+      setRecentResults(data.results || [])
     } catch (error) {
       console.error('Failed to fetch results:', error)
     }
